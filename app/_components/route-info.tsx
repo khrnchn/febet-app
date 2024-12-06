@@ -35,10 +35,6 @@ export default function RouteInfo({ directions, selectedBatchIndex, onBatchSelec
             deliveryWindows: directions.routes.map(() => ({ start: '', end: '' }))
         } : null);
 
-    const handleBatchSelect = (index: number) => {
-        onBatchSelect?.(index);
-    };
-
     return (
         <div className="flex flex-col gap-4">
             <Card className="p-4">
@@ -63,12 +59,11 @@ export default function RouteInfo({ directions, selectedBatchIndex, onBatchSelec
                             {batchInfo.destinations.map((destination, index) => (
                                 <div
                                     key={index}
-                                    className={`p-3 rounded-md cursor-pointer transition-colors ${
-                                        selectedBatchIndex === index
-                                            ? 'bg-primary text-primary-foreground'
-                                            : 'bg-muted hover:bg-muted/80'
-                                    }`}
-                                    onClick={() => handleBatchSelect(index)}
+                                    className={`p-3 rounded-md cursor-pointer transition-colors ${selectedBatchIndex === index
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'bg-muted hover:bg-muted/80'
+                                        }`}
+                                    onClick={() => onBatchSelect?.(index)}
                                 >
                                     <div className="flex justify-between">
                                         <span className="font-medium">Batch {index + 1}</span>

@@ -7,10 +7,10 @@ interface MapProps {
     isLoaded: boolean
     center: google.maps.LatLngLiteral
     directions: google.maps.DirectionsResult | null
-    selectedBatchDirections: google.maps.DirectionsResult | null
     onLoad: (map: google.maps.Map) => void
     onUnmount: () => void
     orders: Delivery[]
+    selectedBatchIndex?: number
 }
 
 interface Delivery {
@@ -22,8 +22,16 @@ interface Delivery {
     deliveryEnd: Date
 }
 
-export default function Map({ isLoaded, center, directions, selectedBatchDirections, onLoad, onUnmount, orders }: MapProps) {
+export default function Map({ isLoaded, center, directions, onLoad, onUnmount, orders, selectedBatchIndex }: MapProps) {
     const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null)
+
+    // Get the selected batch route
+    const selectedRoute = directions && selectedBatchIndex !== undefined && directions.routes[selectedBatchIndex]
+        ? {
+            ...directions,
+            routes: [directions.routes[selectedBatchIndex]]
+        }
+        : directions;
 
     return (
         <div className="flex-1 relative">
@@ -96,6 +104,18 @@ export default function Map({ isLoaded, center, directions, selectedBatchDirecti
                             </div>
                         </InfoWindow>
                     )}
+                    {selectedRoute && (
+                        <DirectionsRenderer
+                            directions={selectedRoute}
+                            options={{
+                                suppressMarkers: false,
+                                polylineOptions: {
+                                    strokeColor: "#459AFE",
+                                    strokeWeight: 4,
+                                },
+                            }}
+                        />
+                    )}
                     <Marker
                         position={{ lat: 3.100240985840765, lng: 101.63122341164973 }}
                         title="BloomThis HQ"
@@ -107,30 +127,6 @@ export default function Map({ isLoaded, center, directions, selectedBatchDirecti
                             strokeWeight: 0,
                         }}
                     />
-                    {directions && (
-                        <DirectionsRenderer
-                            directions={directions}
-                            options={{
-                                suppressMarkers: false,
-                                polylineOptions: {
-                                    strokeColor: "#459AFE",
-                                    strokeWeight: 4,
-                                },
-                            }}
-                        />
-                    )}
-                    {selectedBatchDirections && (
-                        <DirectionsRenderer
-                            directions={selectedBatchDirections}
-                            options={{
-                                suppressMarkers: false,
-                                polylineOptions: {
-                                    strokeColor: "#459AFE",
-                                    strokeWeight: 4,
-                                },
-                            }}
-                        />
-                    )}
                 </GoogleMap>
             ) : (
                 <div className="w-full h-full flex items-center justify-center">

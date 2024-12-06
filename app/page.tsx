@@ -21,6 +21,7 @@ export default function Home() {
   const [selectedVehicle, setSelectedVehicle] = useState("car");
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
   const [showRouteInfo, setShowRouteInfo] = useState(false);
+  const [selectedBatchIndex, setSelectedBatchIndex] = useState<number | undefined>(undefined);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
@@ -36,7 +37,7 @@ export default function Home() {
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: 'AIzaSyB9ZJBHD09W3Wj4uu6dIcA4ShvQWa0qu4E',
+    googleMapsApiKey: 'AIzaSyAvVBml58cpcguCHR8_4Gz9RJTpT9Gci4s',
     libraries
   });
 
@@ -212,6 +213,10 @@ export default function Home() {
     }
   };
 
+  const handleBatchSelect = (index: number) => {
+    setSelectedBatchIndex(index);
+  };
+
   return (
     <div className="flex flex-col h-screen">
       <div className="flex flex-1">
@@ -282,8 +287,8 @@ export default function Home() {
           {/* Route Information */}
           {directions && <RouteInfo
             directions={directions}
-            isOpen={showRouteInfo}
-            onOpenChange={setShowRouteInfo}
+            selectedBatchIndex={selectedBatchIndex}
+            onBatchSelect={handleBatchSelect}
           />}
 
           {/* Pricing Options */}
@@ -302,6 +307,7 @@ export default function Home() {
           onLoad={onLoad}
           onUnmount={onUnmount}
           orders={localOrders}
+          selectedBatchIndex={selectedBatchIndex}
         >
           {Object.entries(markerPositions).map(([id, position]) => {
             const order = orders.find(o => o.id === id);
