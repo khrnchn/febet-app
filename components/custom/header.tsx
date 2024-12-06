@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import {
     NavigationMenu,
     NavigationMenuItem,
@@ -8,48 +9,34 @@ import {
     NavigationMenuList,
     navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu"
+import { cn } from "@/lib/utils"
+
+const navigationItems = [
+    { href: "/", label: "Deliveries" },
+    { href: "/history", label: "History" },
+    { href: "/report", label: "Report" },
+] as const
 
 export default function Header() {
+    const pathname = usePathname()
+
     return (
         <header className="border-b">
             <div className="flex h-14 items-center px-4">
                 <NavigationMenu>
                     <NavigationMenuList>
-                        <NavigationMenuItem>
-                            <Link href="/" legacyBehavior passHref>
-                                <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                                    <span className="font-semibold">Place Order</span>
-                                </NavigationMenuLink>
-                            </Link>
-                        </NavigationMenuItem>
-                        <NavigationMenuItem>
-                            <Link href="/records" legacyBehavior passHref>
-                                <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                                    Records
-                                </NavigationMenuLink>
-                            </Link>
-                        </NavigationMenuItem>
-                        <NavigationMenuItem>
-                            <Link href="/wallet" legacyBehavior passHref>
-                                <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                                    Wallet
-                                </NavigationMenuLink>
-                            </Link>
-                        </NavigationMenuItem>
-                        <NavigationMenuItem>
-                            <Link href="/drivers" legacyBehavior passHref>
-                                <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                                    Drivers
-                                </NavigationMenuLink>
-                            </Link>
-                        </NavigationMenuItem>
-                        <NavigationMenuItem>
-                            <Link href="/rewards" legacyBehavior passHref>
-                                <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                                    Rewards
-                                </NavigationMenuLink>
-                            </Link>
-                        </NavigationMenuItem>
+                        {navigationItems.map((item) => (
+                            <NavigationMenuItem key={item.href}>
+                                <Link href={item.href} passHref>
+                                    <NavigationMenuLink className={cn(
+                                        navigationMenuTriggerStyle(),
+                                        pathname === item.href && "bg-primary text-primary-foreground"
+                                    )}>
+                                        {item.label}
+                                    </NavigationMenuLink>
+                                </Link>
+                            </NavigationMenuItem>
+                        ))}
                     </NavigationMenuList>
                 </NavigationMenu>
             </div>

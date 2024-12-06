@@ -32,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full bg-gray-50">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`} suppressHydrationWarning
       >
         <Header />
         {children}
