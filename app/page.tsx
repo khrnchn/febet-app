@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { orders } from "@/data/deliveries";
 import type { Library } from "@react-google-maps/api";
 import { Marker, useJsApiLoader } from "@react-google-maps/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Map from './_components/map';
 import { Card } from "@/components/ui/card"
 
@@ -20,49 +20,15 @@ const libraries: Library[] = ["places"];
 export default function Home() {
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
   const [selectedBatchIndex, setSelectedBatchIndex] = useState<number | undefined>(undefined);
-  const [map, setMap] = useState<google.maps.Map | null>(null);
-  const [origin, setOrigin] = useState("");
-  const [destination, setDestination] = useState("");
   const [markerPositions, setMarkerPositions] = useState<{ [key: string]: google.maps.LatLng }>({});
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [localOrders, setLocalOrders] = useState(orders);
 
-  const originRef = useRef<HTMLInputElement>(null);
-  const destinationRef = useRef<HTMLInputElement>(null);
-
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: '',
+    googleMapsApiKey: 'AIzaSyAvVBml58cpcguCHR8_4Gz9RJTpT9Gci4s',
     libraries
   });
-
-  useEffect(() => {
-    if (isLoaded && originRef.current && destinationRef.current) {
-      const originAutocomplete = new google.maps.places.Autocomplete(originRef.current, {
-        fields: ["formatted_address", "geometry"],
-        types: ["geocode", "establishment"]
-      });
-
-      const destinationAutocomplete = new google.maps.places.Autocomplete(destinationRef.current, {
-        fields: ["formatted_address", "geometry"],
-        types: ["geocode", "establishment"]
-      });
-
-      originAutocomplete.addListener("place_changed", () => {
-        const place = originAutocomplete.getPlace();
-        if (place.formatted_address) {
-          setOrigin(place.formatted_address);
-        }
-      });
-
-      destinationAutocomplete.addListener("place_changed", () => {
-        const place = destinationAutocomplete.getPlace();
-        if (place.formatted_address) {
-          setDestination(place.formatted_address);
-        }
-      });
-    }
-  }, [isLoaded]);
 
   useEffect(() => {
     if (isLoaded) {
@@ -82,14 +48,6 @@ export default function Home() {
       geocodeAllDestinations();
     }
   }, [isLoaded]);
-
-  const onLoad = useCallback((map: google.maps.Map) => {
-    setMap(map);
-  }, []);
-
-  const onUnmount = useCallback(() => {
-    setMap(null);
-  }, []);
 
   const calculateOptimizedRoute = async () => {
     if (!isLoaded) return;
@@ -467,8 +425,6 @@ export default function Home() {
           isLoaded={isLoaded}
           center={center}
           directions={directions}
-          onLoad={onLoad}
-          onUnmount={onUnmount}
           orders={localOrders}
           selectedBatchIndex={selectedBatchIndex}
         >
@@ -501,16 +457,6 @@ function RouteInfo({ directions, selectedBatchIndex, onBatchSelect }: RouteInfoP
     const legs = routes[0].legs
 
     if (!legs) return null
-
-    const totalDistance = legs.reduce((acc, leg) => acc + (leg.distance?.value || 0), 0)
-    const stopBuffer = 900 * (legs.length) // 15 minutes per stop
-    const totalDuration = legs.reduce((acc, leg) => acc + (leg.duration?.value || 0), 0) + stopBuffer
-
-    // Convert to human-readable format
-    const distanceInKm = (totalDistance / 1000).toFixed(2)
-    const durationInMinutes = Math.round(totalDuration / 60)
-    const hours = Math.floor(durationInMinutes / 60)
-    const minutes = durationInMinutes % 60
 
     // Extract batch information if available
     const batchInfo = (directions as any).batchInfo ||

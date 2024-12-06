@@ -1,5 +1,6 @@
 'use client'
 
+import { Delivery } from '@/data/deliveries'
 import { GoogleMap, DirectionsRenderer, Marker, InfoWindow } from '@react-google-maps/api'
 import { useState } from 'react'
 
@@ -11,15 +12,6 @@ interface MapProps {
     onUnmount: () => void
     orders: Delivery[]
     selectedBatchIndex?: number
-}
-
-interface Delivery {
-    id: string
-    destination: string
-    coordinates: { lat: number; lng: number }
-    vehicleType: string
-    deliveryStart: Date
-    deliveryEnd: Date
 }
 
 export default function Map({ isLoaded, center, directions, onLoad, onUnmount, orders, selectedBatchIndex }: MapProps) {
@@ -98,7 +90,6 @@ export default function Map({ isLoaded, center, directions, onLoad, onUnmount, o
                         >
                             <div>
                                 <h2>{selectedDelivery.destination}</h2>
-                                <p><strong>Vehicle:</strong> {selectedDelivery.vehicleType}</p>
                                 <p><strong>Start:</strong> {new Date(selectedDelivery.deliveryStart).toLocaleString()}</p>
                                 <p><strong>End:</strong> {new Date(selectedDelivery.deliveryEnd).toLocaleString()}</p>
                             </div>
