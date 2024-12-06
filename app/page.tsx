@@ -37,7 +37,7 @@ export default function Home() {
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: 'AIzaSyAvVBml58cpcguCHR8_4Gz9RJTpT9Gci4s',
+    googleMapsApiKey: '',
     libraries
   });
 
@@ -107,36 +107,101 @@ export default function Home() {
       new Date(a.deliveryStart).getTime() - new Date(b.deliveryStart).getTime()
     );
 
-    // Function to calculate time difference in hours
+    // Helper functions
     const getTimeDifferenceInHours = (start: string, end: string) => {
       const startTime = new Date(start);
       const endTime = new Date(end);
       return (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
     };
 
-    // Group orders into batches that can be delivered within 2 hours
-    const batches: Order[][] = [];
-    let currentBatch: Order[] = [];
-    let currentBatchStartTime: Date | null = null;
+    const calculateDistance = (coord1: google.maps.LatLngLiteral, coord2: google.maps.LatLngLiteral) => {
+      const R = 6371; // Earth's radius in km
+      const lat1 = coord1.lat * Math.PI / 180;
+      const lat2 = coord2.lat * Math.PI / 180;
+      const dLat = (coord2.lat - coord1.lat) * Math.PI / 180;
+      const dLng = (coord2.lng - coord1.lng) * Math.PI / 180;
 
-    for (const order of sortedOrders) {
-      const orderStartTime = new Date(order.deliveryStart);
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1) * Math.cos(lat2) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
 
-      // If no current batch or current batch exceeds 2-hour window, start a new batch
-      if (!currentBatchStartTime ||
-        getTimeDifferenceInHours(currentBatchStartTime.toISOString(), order.deliveryEnd) > 2) {
-        if (currentBatch.length > 0) {
-          batches.push(currentBatch);
-        }
-        currentBatch = [order];
-        currentBatchStartTime = orderStartTime;
-      } else {
-        currentBatch.push(order);
+    // Function to check if an order can be added to a batch
+    const canAddToBatch = (batch: any[], newOrder: any): boolean => {
+      if (batch.length === 0) return true;
+      if (batch.length >= 10) return false; // Maximum 10 deliveries per batch
+
+      const batchStartTime = Math.min(
+        ...batch.map(order => new Date(order.deliveryStart).getTime())
+      );
+      const batchEndTime = Math.max(
+        ...batch.map(order => new Date(order.deliveryEnd).getTime())
+      );
+      const orderStartTime = new Date(newOrder.deliveryStart).getTime();
+      const orderEndTime = new Date(newOrder.deliveryEnd).getTime();
+
+      // Check time window overlap
+      const overlapStart = Math.max(batchStartTime, orderStartTime);
+      const overlapEnd = Math.min(batchEndTime, orderEndTime);
+      if (overlapStart > overlapEnd) return false;
+
+      // Calculate estimated delivery time including the new order
+      let totalDistance = 0;
+      const allPoints = [...batch.map(o => o.coordinates), newOrder.coordinates];
+
+      // Calculate total route distance (simplified estimation)
+      for (let i = 0; i < allPoints.length - 1; i++) {
+        totalDistance += calculateDistance(allPoints[i], allPoints[i + 1]);
       }
-    }
 
-    // Add the last batch if not empty
-    if (currentBatch.length > 0) {
+      // Estimate delivery time (assume average speed of 30 km/h in city traffic)
+      const estimatedTimeHours = totalDistance / 30;
+      const stopTime = (batch.length + 1) * 0.25; // 15 minutes per stop
+      const totalTimeHours = estimatedTimeHours + stopTime;
+
+      return totalTimeHours <= 2;
+    };
+
+    // Create optimized batches
+    const batches: any[][] = [];
+    const unassignedOrders = [...sortedOrders];
+
+    while (unassignedOrders.length > 0) {
+      const currentBatch: any[] = [];
+      const seed = unassignedOrders[0];
+      currentBatch.push(seed);
+      unassignedOrders.splice(0, 1);
+
+      // Try to add more orders to the current batch
+      let added: boolean;
+      do {
+        added = false;
+        let bestDistance = Infinity;
+        let bestOrderIndex = -1;
+
+        // Find the closest order that can be added to the batch
+        for (let i = 0; i < unassignedOrders.length; i++) {
+          const order = unassignedOrders[i];
+          if (canAddToBatch(currentBatch, order)) {
+            const lastOrder = currentBatch[currentBatch.length - 1];
+            const distance = calculateDistance(lastOrder.coordinates, order.coordinates);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestOrderIndex = i;
+            }
+          }
+        }
+
+        // Add the best order to the batch
+        if (bestOrderIndex !== -1) {
+          currentBatch.push(unassignedOrders[bestOrderIndex]);
+          unassignedOrders.splice(bestOrderIndex, 1);
+          added = true;
+        }
+      } while (added && currentBatch.length < 10);
+
       batches.push(currentBatch);
     }
 
@@ -144,25 +209,20 @@ export default function Home() {
     const batchResults: google.maps.DirectionsResult[] = [];
 
     for (const batch of batches) {
-      // Create waypoints from all orders except the last one
       const waypoints = batch.slice(0, -1).map(order => ({
         location: order.coordinates,
         stopover: true
       }));
 
-      // Get the last order's destination as the final destination
-      const finalDestination = batch[batch.length - 1].coordinates;
-
       try {
         const result = await directionsService.route({
           origin: bloomThisHQ,
-          destination: finalDestination,
+          destination: batch[batch.length - 1].coordinates,
           waypoints: waypoints,
           optimizeWaypoints: true,
           travelMode: google.maps.TravelMode.DRIVING,
         });
 
-        // Annotate the result with batch information
         (result as any).batchInfo = {
           batchSize: batch.length,
           destinations: batch.map(order => order.destination),
@@ -178,13 +238,23 @@ export default function Home() {
       }
     }
 
-    // If we have multiple batch results, combine them
+    // Combine batch results
     const finalDirections: google.maps.DirectionsResult = batchResults.length > 1
       ? {
         routes: batchResults.flatMap(result => result.routes),
         request: batchResults[0].request,
-        status: google.maps.DirectionsStatus.OK
-      }
+        status: google.maps.DirectionsStatus.OK,
+        batchInfo: {
+          batchSize: batches.reduce((total, batch) => total + batch.length, 0),
+          destinations: batches.flatMap(batch => batch.map(order => order.destination)),
+          deliveryWindows: batches.flatMap(batch =>
+            batch.map(order => ({
+              start: order.deliveryStart,
+              end: order.deliveryEnd
+            }))
+          )
+        }
+      } as any
       : batchResults[0];
 
     setDirections(finalDirections);

@@ -12,8 +12,8 @@ interface RouteInfoProps {
 export default function RouteInfo({ directions, selectedBatchIndex, onBatchSelect }: RouteInfoProps) {
     if (!directions || !directions.routes[0]) return null
 
-    const route = directions.routes[0]
-    const legs = route.legs
+    const routes = directions.routes
+    const legs = routes[0].legs
 
     if (!legs) return null
 
@@ -37,20 +37,6 @@ export default function RouteInfo({ directions, selectedBatchIndex, onBatchSelec
 
     return (
         <div className="flex flex-col gap-4">
-            <Card className="p-4">
-                <h3 className="text-lg font-semibold mb-4">Route Summary</h3>
-                <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                        <span className="font-medium">Total Distance:</span>
-                        <span>{distanceInKm} km</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <span className="font-medium">Estimated Duration:</span>
-                        <span>{hours > 0 ? `${hours}h ` : ''}{minutes}min</span>
-                    </div>
-                </div>
-            </Card>
-
             {batchInfo && (
                 <Card className="p-4">
                     <h3 className="text-lg font-semibold mb-2">Delivery Batches</h3>
@@ -59,21 +45,44 @@ export default function RouteInfo({ directions, selectedBatchIndex, onBatchSelec
                             {batchInfo.destinations.map((destination, index) => (
                                 <div
                                     key={index}
-                                    className={`p-3 rounded-md cursor-pointer transition-colors ${selectedBatchIndex === index
+                                    className={`p-4 rounded-md cursor-pointer transition-colors ${selectedBatchIndex === index
                                         ? 'bg-primary text-primary-foreground'
                                         : 'bg-muted hover:bg-muted/80'
                                         }`}
                                     onClick={() => onBatchSelect?.(index)}
                                 >
-                                    <div className="flex justify-between">
-                                        <span className="font-medium">Batch {index + 1}</span>
-                                        <span className="text-sm opacity-90">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="font-semibold text-base">Batch {index + 1}</span>
+                                        <span className={`text-xs px-2 py-1 rounded-full ${selectedBatchIndex === index
+                                            ? 'bg-primary-foreground/20 text-primary-foreground'
+                                            : 'bg-background text-muted-foreground'}`}>
                                             {batchInfo.deliveryWindows[index]?.start
                                                 ? `${new Date(batchInfo.deliveryWindows[index].start).toLocaleTimeString()} - ${new Date(batchInfo.deliveryWindows[index].end).toLocaleTimeString()}`
-                                                : 'Time not specified'}
+                                                : 'No delivery window set'}
                                         </span>
                                     </div>
-                                    <p className="text-sm mt-1">{destination}</p>
+                                    <div className="space-y-2">
+                                        <p className="text-sm font-medium">{destination}</p>
+                                        <div className="flex gap-3">
+                                            <div className="flex items-center gap-1.5">
+                                                <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <circle cx="12" cy="12" r="10" />
+                                                    <polyline points="12 6 12 12 16 14" />
+                                                </svg>
+                                                <span className="text-xs opacity-90">
+                                                    {routes[index]?.legs[0]?.duration?.text || 'Duration N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M12 2v20M2 12h20" />
+                                                </svg>
+                                                <span className="text-xs opacity-90">
+                                                    {routes[index]?.legs[0]?.distance?.text || 'Distance N/A'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             ))}
                         </div>
