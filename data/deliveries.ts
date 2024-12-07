@@ -11,43 +11,57 @@ export interface Delivery {
   productId: string;
 }
 
-// Generate random coordinates within KL area
-const generateLocation = () => {
-  // KL area bounds
-  const KL_BOUNDS = {
-    lat: { min: 3.0800, max: 3.1800 },
-    lng: { min: 101.6500, max: 101.7500 }
+// Generate a random location within Klang Valley bounds (excluding Klang)
+const generateRandomLocation = () => {
+  // Klang Valley bounds (excluding Klang, covering KL, PJ, Shah Alam, Subang, etc.)
+  const bounds = {
+    north: 3.2614, // Rawang area
+    south: 2.8850, // Putrajaya/Cyberjaya area
+    east: 101.8921, // Ampang/Hulu Langat area
+    west: 101.4456  // Shah Alam area
   };
-  
-  return {
-    lat: KL_BOUNDS.lat.min + Math.random() * (KL_BOUNDS.lat.max - KL_BOUNDS.lat.min),
-    lng: KL_BOUNDS.lng.min + Math.random() * (KL_BOUNDS.lng.max - KL_BOUNDS.lng.min)
-  };
+
+  const lat = bounds.south + Math.random() * (bounds.north - bounds.south);
+  const lng = bounds.west + Math.random() * (bounds.east - bounds.west);
+
+  return { lat, lng };
 };
 
-// Common locations in KL
-const locations = [
-  "Pavilion Kuala Lumpur",
-  "Suria KLCC",
-  "Mid Valley Megamall",
-  "The Gardens Mall",
-  "Berjaya Times Square",
-  "Nu Sentral",
-  "Lot 10",
-  "Starhill Gallery",
-  "Publika Shopping Gallery",
-  "The Intermark Mall",
-  "Avenue K",
-  "Quill City Mall",
-  "Central Market",
-  "Ampang Park",
-  "Great Eastern Mall",
-  "Bangsar Shopping Centre",
-  "Bangsar Village",
-  "The Sphere",
-  "Sunway Velocity Mall",
-  "MyTown Shopping Centre"
+// List of popular areas in Klang Valley (excluding Klang) for more realistic addresses
+const popularAreas = [
+  "Petaling Jaya",
+  "Shah Alam",
+  "Subang Jaya",
+  "Ampang",
+  "Cheras",
+  "Puchong",
+  "Cyberjaya",
+  "Putrajaya",
+  "Rawang",
+  "Kajang",
+  "Seri Kembangan",
+  "Bangi",
+  "Damansara",
+  "Mont Kiara",
+  "Kepong",
+  "Gombak",
+  "Setapak",
+  "Wangsa Maju",
+  "Bangsar",
+  "USJ",
+  "Kota Damansara",
+  "Ara Damansara"
 ];
+
+const generateRandomAddress = () => {
+  const area = popularAreas[Math.floor(Math.random() * popularAreas.length)];
+  const streetNumber = Math.floor(Math.random() * 200) + 1;
+  const streetTypes = ["Jalan", "Lorong", "Persiaran", "Lebuh"];
+  const streetType = streetTypes[Math.floor(Math.random() * streetTypes.length)];
+  const streetName = Math.floor(Math.random() * 50) + 1;
+
+  return `${streetNumber}, ${streetType} ${streetName}, ${area}, Selangor`;
+};
 
 // Product types
 const products = [
@@ -64,8 +78,8 @@ const products = [
 // Generate orders
 export const orders: Delivery[] = Array.from({ length: 30 }, (_, i) => {
   const id = (i + 1).toString().padStart(3, '0');
-  const location = locations[Math.floor(Math.random() * locations.length)];
-  const coords = generateLocation();
+  const location = generateRandomAddress();
+  const coords = generateRandomLocation();
   const productType = products[Math.floor(Math.random() * products.length)];
   const productId = `${productType}-${Math.floor(Math.random() * 10 + 1).toString().padStart(2, '0')}`;
   

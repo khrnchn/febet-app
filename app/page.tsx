@@ -17,16 +17,56 @@ const center = {
 
 const libraries: Library[] = ["places"];
 
+interface Delivery {
+  id: string;
+  orderNumber: string;
+  productId: string;
+  customerName: string;
+  customerContact: string;
+  destination: string;
+  coordinates: google.maps.LatLngLiteral;
+  deliveryStart: string;
+  deliveryEnd: string;
+}
+
+interface BatchInfo {
+  id: string;
+  batchSize: number;
+  totalDuration: number;
+  totalDistance: number;
+  estimatedCompletionTime: number;
+  deliveries: (Delivery & { stopNumber: number; estimatedArrival: string; deliveryStart: string; deliveryEnd: string })[];
+  routeMetrics: {
+    legs: {
+      duration: google.maps.Duration | undefined;
+      distance: google.maps.Distance | undefined;
+      startAddress: string;
+      endAddress: string;
+    }[];
+  };
+}
+
+interface DirectionsWithBatchInfo extends google.maps.DirectionsResult {
+  batchInfo: {
+    totalBatches: number;
+    totalDeliveries: number;
+    averageDeliveriesPerBatch: number;
+    batches: BatchInfo[];
+  };
+}
+
 export default function Home() {
-  const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
-  const [selectedBatchIndex, setSelectedBatchIndex] = useState<number | undefined>(undefined);
+  const [localOrders, setLocalOrders] = useState<Delivery[]>(orders);
+  const [directions, setDirections] = useState<DirectionsWithBatchInfo | null>(null);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>();
   const [markerPositions, setMarkerPositions] = useState<{ [key: string]: google.maps.LatLng }>({});
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [localOrders, setLocalOrders] = useState(orders);
+  const [activeTab, setActiveTab] = useState<'deliveries' | 'orders'>('deliveries');
+  const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: 'AIzaSyAvVBml58cpcguCHR8_4Gz9RJTpT9Gci4s',
+    googleMapsApiKey: '',
     libraries
   });
 
@@ -34,15 +74,27 @@ export default function Home() {
     if (isLoaded) {
       const geocodeAllDestinations = async () => {
         const positions: { [key: string]: google.maps.LatLng } = {};
+        const validOrders: typeof orders = [];
+
         for (const order of localOrders) {
           try {
             const position = await geocodeAddress(order.destination);
-            positions[order.id] = position;
+            if (position) {
+              positions[order.id] = position;
+              validOrders.push(order);
+            } else {
+              console.error(`Failed to geocode order ${order.orderNumber} - ${order.destination}: No results found`);
+            }
           } catch (error) {
-            console.error(`Error geocoding ${order.destination}:`, error);
+            console.error(`Error geocoding order ${order.orderNumber} - ${order.destination}:`, error);
           }
         }
+
         setMarkerPositions(positions);
+        if (validOrders.length !== localOrders.length) {
+          console.log(`Removed ${localOrders.length - validOrders.length} orders due to geocoding failures`);
+          setLocalOrders(validOrders);
+        }
       };
 
       geocodeAllDestinations();
@@ -51,6 +103,24 @@ export default function Home() {
 
   const calculateOptimizedRoute = async () => {
     if (!isLoaded) return;
+    setIsOptimizing(true);
+
+    // Validate orders have coordinates
+    const validOrders = localOrders.filter(order => {
+      const hasValidCoords = order.coordinates &&
+        typeof order.coordinates.lat === 'number' &&
+        typeof order.coordinates.lng === 'number';
+      if (!hasValidCoords) {
+        console.error(`Order ${order.orderNumber} has invalid coordinates:`, order.coordinates);
+      }
+      return hasValidCoords;
+    });
+
+    if (validOrders.length === 0) {
+      console.error("No valid orders with coordinates found");
+      setIsOptimizing(false);
+      return;
+    }
 
     const directionsService = new google.maps.DirectionsService();
     const bloomThisHQ = new google.maps.LatLng(center.lat, center.lng);
@@ -59,13 +129,6 @@ export default function Home() {
     const sortedOrders = [...localOrders].sort((a, b) =>
       new Date(a.deliveryStart).getTime() - new Date(b.deliveryStart).getTime()
     );
-
-    // Helper functions
-    const getTimeDifferenceInHours = (start: string | number, end: string | number) => {
-      const startTime = typeof start === 'string' ? new Date(start).getTime() : start;
-      const endTime = typeof end === 'string' ? new Date(end).getTime() : end;
-      return (endTime - startTime) / (1000 * 60 * 60);
-    };
 
     const calculateDistance = (coord1: google.maps.LatLngLiteral, coord2: google.maps.LatLngLiteral) => {
       const R = 6371; // Earth's radius in km
@@ -99,20 +162,20 @@ export default function Home() {
     // Function to check if a route is feasible within time windows
     const isRouteFeasible = (route: any[]) => {
       let currentTime = new Date(route[0].deliveryStart).getTime();
-      
+
       for (const stop of route) {
         const windowStart = new Date(stop.deliveryStart).getTime();
         const windowEnd = new Date(stop.deliveryEnd).getTime();
-        
+
         // If we arrive before the window starts, wait
         currentTime = Math.max(currentTime, windowStart);
-        
+
         // If we arrive after the window ends, route is infeasible
         if (currentTime > windowEnd) return false;
-        
+
         // Add service time (15 minutes)
         currentTime += 15 * 60 * 1000;
-        
+
         // If we're not at the last stop, add travel time to next stop
         if (stop !== route[route.length - 1]) {
           const nextStop = route[route.indexOf(stop) + 1];
@@ -121,15 +184,15 @@ export default function Home() {
           currentTime += travelTime;
         }
       }
-      
+
       // Check if total duration is within 2 hours
       const totalDuration = (currentTime - new Date(route[0].deliveryStart).getTime()) / (1000 * 60 * 60);
       return totalDuration <= 4;
     };
 
     // Create optimized batches using a greedy algorithm with time windows
-    const optimizedBatches: any[][] = [];
-    
+    const optimizedBatches: Delivery[][] = [];
+
     // Set all orders to have time window 12:00-16:00
     const standardizedOrders = sortedOrders.map(order => ({
       ...order,
@@ -147,9 +210,9 @@ export default function Home() {
     });
 
     while (unassignedOrders.length > 0) {
-      let currentBatch: any[] = [unassignedOrders[0]];
+      let currentBatch: Delivery[] = [unassignedOrders[0]];
       unassignedOrders = unassignedOrders.slice(1);
-      
+
       // Keep adding orders until batch is full
       while (unassignedOrders.length > 0) {
         let bestOrder = {
@@ -161,7 +224,7 @@ export default function Home() {
         // Try each remaining order
         for (let i = 0; i < unassignedOrders.length; i++) {
           const order = unassignedOrders[i];
-          
+
           // Try inserting at each position
           for (let pos = 0; pos <= currentBatch.length; pos++) {
             const newRoute = [
@@ -175,7 +238,7 @@ export default function Home() {
             // Calculate score based primarily on route size and duration
             const routeDuration = estimateRouteDuration(newRoute);
             const score = newRoute.length * 10 + // Heavily weight number of stops
-                         (7200 - routeDuration) / 60; // Add small bonus for shorter routes
+              (7200 - routeDuration) / 60; // Add small bonus for shorter routes
 
             if (score > bestOrder.score) {
               bestOrder = {
@@ -214,59 +277,134 @@ export default function Home() {
     }
 
     // Calculate routes for optimized batches
-    const batchResults: google.maps.DirectionsResult[] = [];
+    const batchResults: (google.maps.DirectionsResult & { batchInfo?: BatchInfo })[] = [];
 
     for (const batch of optimizedBatches) {
-      const waypoints = batch.slice(0, -1).map(order => ({
-        location: order.coordinates,
-        stopover: true
-      }));
-
-      try {
-        const result = await directionsService.route({
-          origin: bloomThisHQ,
-          destination: batch[batch.length - 1].coordinates,
-          waypoints: waypoints,
-          optimizeWaypoints: true,
-          travelMode: google.maps.TravelMode.DRIVING,
-        });
-
-        // Calculate actual route metrics
-        const totalDuration = result.routes[0].legs.reduce(
-          (acc, leg) => acc + (leg.duration?.value || 0), 0
-        );
-        const totalDistance = result.routes[0].legs.reduce(
-          (acc, leg) => acc + (leg.distance?.value || 0), 0
-        );
-
-        (result as any).batchInfo = {
-          batchSize: batch.length,
-          totalDuration: totalDuration,
-          totalDistance: totalDistance,
-          estimatedCompletionTime: Math.ceil((totalDuration + (batch.length * 15 * 60)) / 60), // in minutes
-          deliveries: batch.map((order, index) => ({
-            ...order,
-            stopNumber: index + 1,
-            estimatedArrival: result.routes[0].legs[index]?.duration?.text || 'N/A'
-          })),
-          routeMetrics: {
-            legs: result.routes[0].legs.map(leg => ({
-              duration: leg.duration,
-              distance: leg.distance,
-              startAddress: leg.start_address,
-              endAddress: leg.end_address
-            }))
+      if (batch.length > 0) {
+        try {
+          // Validate batch data before processing
+          if (!batch.every(delivery =>
+            delivery?.coordinates?.lat != null &&
+            delivery?.coordinates?.lng != null
+          )) {
+            console.error("Invalid delivery coordinates in batch:", {
+              batch: batch.map(d => ({
+                orderNumber: d.orderNumber,
+                coordinates: d.coordinates,
+              }))
+            });
+            continue;
           }
-        };
 
-        batchResults.push(result);
-      } catch (error) {
-        console.error("Error calculating route for batch:", error);
+          const lastDelivery = batch[batch.length - 1];
+          const intermediateStops = batch.slice(0, -1);
+
+          // Create and validate waypoints
+          const waypoints: google.maps.DirectionsWaypoint[] = intermediateStops.map(order => ({
+            location: {
+              lat: order.coordinates.lat,
+              lng: order.coordinates.lng
+            },
+            stopover: true
+          }));
+
+          const result = await directionsService.route({
+            origin: bloomThisHQ,
+            destination: {
+              lat: lastDelivery.coordinates.lat,
+              lng: lastDelivery.coordinates.lng
+            },
+            waypoints,
+            optimizeWaypoints: true,
+            travelMode: google.maps.TravelMode.DRIVING,
+          });
+
+          if (!result || !result.routes?.[0]) {
+            throw new Error('Invalid route result');
+          }
+
+          const totalDuration = result.routes[0].legs.reduce(
+            (acc, leg) => acc + (leg.duration?.value || 0), 0
+          );
+          const totalDistance = result.routes[0].legs.reduce(
+            (acc, leg) => acc + (leg.distance?.value || 0), 0
+          );
+
+          // Get the waypoint order from the optimized route
+          const waypointOrder = result.routes[0].waypoint_order || [];
+
+          // Reorder the deliveries based on the optimized waypoint order
+          const orderedDeliveries = [...intermediateStops]
+            .map((_, index) => intermediateStops[waypointOrder[index] || index])
+            .filter(Boolean);
+
+          orderedDeliveries.push(lastDelivery);
+
+          // Calculate cumulative time and ETAs
+          let cumulativeSeconds = 0;
+          // Set start time to 12:00 PM
+          const baseStartTime = (() => {
+            const noon = new Date();
+            noon.setHours(12, 0, 0, 0);
+            return noon;
+          })();
+
+          const deliveriesWithETA = orderedDeliveries.map((order, index) => {
+            // Get the leg duration in seconds
+            const legDuration = result.routes[0].legs[index]?.duration?.value || 0;
+            // Add 15 minutes (900 seconds) for each delivery stop
+            const stopTime = 900;
+
+            // Calculate arrival time
+            const arrivalTime = new Date(baseStartTime);
+            arrivalTime.setSeconds(arrivalTime.getSeconds() + cumulativeSeconds + legDuration);
+
+            // Update cumulative time for next delivery
+            cumulativeSeconds += legDuration + stopTime;
+
+            return {
+              ...order,
+              stopNumber: index + 1,
+              estimatedArrival: arrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              duration: result.routes[0].legs[index]?.duration?.text || 'N/A'
+            };
+          });
+
+          // Create batch info with ordered deliveries and unique ID
+          const batchId = Math.random().toString(36).substr(2, 9);
+          (result as any).batchInfo = {
+            id: batchId,
+            batchSize: batch.length,
+            totalDuration,
+            totalDistance,
+            estimatedCompletionTime: Math.ceil((totalDuration + (batch.length * 15 * 60)) / 60),
+            deliveries: deliveriesWithETA,
+            routeMetrics: {
+              legs: result.routes[0].legs.map(leg => ({
+                duration: leg.duration,
+                distance: leg.distance,
+                startAddress: leg.start_address,
+                endAddress: leg.end_address
+              }))
+            }
+          };
+
+          console.log('Created batch:', {
+            batchId,
+            deliveryCount: orderedDeliveries.length,
+            firstDeliveryId: orderedDeliveries[0]?.id,
+            lastDeliveryId: orderedDeliveries[orderedDeliveries.length - 1]?.id
+          });
+
+          batchResults.push(result as any);
+        } catch (error) {
+          console.error("Error calculating route for batch:", error);
+        }
       }
     }
 
-    // Combine batch results
-    const finalDirections: google.maps.DirectionsResult = batchResults.length > 1
+    // Combine batch results with IDs
+    const finalDirections = batchResults.length > 1
       ? {
         routes: batchResults.flatMap(result => result.routes),
         request: batchResults[0].request,
@@ -281,19 +419,20 @@ export default function Home() {
       : batchResults[0];
 
     setDirections(finalDirections);
+    setIsOptimizing(false);
   };
 
-  const geocodeAddress = (address: string) => {
+  const geocodeAddress = async (address: string): Promise<google.maps.LatLng | null> => {
     const geocoder = new google.maps.Geocoder();
-    return new Promise<google.maps.LatLng>((resolve, reject) => {
-      geocoder.geocode({ address }, (results, status) => {
-        if (status === google.maps.GeocoderStatus.OK) {
-          resolve(results[0].geometry.location);
-        } else {
-          reject(status);
-        }
-      });
-    });
+    try {
+      const result = await geocoder.geocode({ address: `${address}, Kuala Lumpur, Malaysia` });
+      if (result.results[0]?.geometry?.location) {
+        return result.results[0].geometry.location;
+      }
+      return null;
+    } catch (error) {
+      throw error;
+    }
   };
 
   const handleAutoAssign = async () => {
@@ -305,119 +444,117 @@ export default function Home() {
     }
   };
 
-  const handleBatchSelect = (index: number) => {
-    setSelectedBatchIndex(index);
+  const handleBatchSelect = (batchId: string) => {
+    setSelectedBatchId(batchId);
+  };
+
+  const handleOrderSelect = (order: Delivery) => {
+    setSelectedDelivery(order);
+    // If the order is part of a batch, select that batch
+    if (directions && (directions as any).batchInfo?.batches) {
+      for (const batch of (directions as any).batchInfo.batches) {
+        if (batch.deliveries.some(delivery => delivery.id === order.id)) {
+          setSelectedBatchId(batch.id);
+          break;
+        }
+      }
+    }
   };
 
   return (
-    <div className="flex flex-col h-screen">
-      <div className="flex flex-1">
+    <div className="flex flex-col h-[calc(100vh-56px)]">
+      <div className="flex flex-1 h-full">
         {/* Left Panel */}
-        <div className="w-[400px] border-r p-4 flex flex-col">
-          <h3 className="text-lg font-semibold mb-2">Orders</h3>
-          {/* Input Field */}
-          <div className="mb-4">
-            <Input
-              type="text"
-              placeholder="Add new order destination"
-              ref={(input) => {
-                if (input && isLoaded) {
-                  const autocomplete = new google.maps.places.Autocomplete(input, {
-                    types: ['address'],
-                    componentRestrictions: { country: 'my' }
-                  });
-                  autocomplete.addListener('place_changed', () => {
-                    const place = autocomplete.getPlace();
-                    if (place.formatted_address) {
-                      const newOrder = {
-                        id: `order-${localOrders.length + 1}`,
-                        destination: place.formatted_address,
-                        coordinates: {
-                          lat: place.geometry?.location?.lat() || 0,
-                          lng: place.geometry?.location?.lng() || 0,
-                        },
-                      };
-                      setLocalOrders([...localOrders, newOrder]);
-                      input.value = '';
-                    }
-                  });
-                }
-              }}
-            />
-          </div>
-
-          {/* Destination List */}
-          <div className="flex flex-col gap-4 p-4">
-            <h2 className="text-xl font-bold">Orders List</h2>
-            <div className="overflow-y-auto max-h-[500px] pr-2">
-              <div className="flex flex-col gap-4">
-                {localOrders.map((order) => (
-                  <div key={order.id} className="bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="text-lg font-semibold text-primary">{order.orderNumber}</div>
-                      <div className="px-2 py-1 bg-primary/10 rounded-full text-sm text-primary">
-                        {order.productId}
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-600">👤</span>
-                        <div>
-                          <div className="font-medium">{order.customerName}</div>
-                          <div className="text-sm text-gray-600">{order.customerContact}</div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-start gap-2">
-                        <span className="text-gray-600">📍</span>
-                        <div className="text-sm">{order.destination}</div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-600">🕒</span>
-                        <div className="text-sm">
-                          {new Date(order.deliveryStart).toLocaleTimeString()} - 
-                          {new Date(order.deliveryEnd).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    </div>
-
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-3 w-full text-destructive hover:text-destructive/80 border border-destructive/20"
-                      onClick={() => setLocalOrders(orders => orders.filter(o => o.id !== order.id))}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </div>
+        <div className="flex-none w-[400px] border-r overflow-hidden flex flex-col">
+          {/* Tabs */}
+          <div className="border-b">
+            <div className="flex">
+              <button
+                className={`flex-1 px-4 py-2 text-sm font-medium ${activeTab === 'deliveries'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                onClick={() => setActiveTab('deliveries')}
+              >
+                Deliveries
+              </button>
+              <button
+                className={`flex-1 px-4 py-2 text-sm font-medium ${activeTab === 'orders'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                onClick={() => setActiveTab('orders')}
+              >
+                Orders
+              </button>
             </div>
           </div>
 
-          <Button
-            className="mt-4"
-            onClick={handleAutoAssign}
-            disabled={isOptimizing}
-          >
-            {isOptimizing ? "Optimizing..." : "Auto-assign"}
-          </Button>
-
-          {/* Route Information */}
-          {directions && <RouteInfo
-            directions={directions}
-            selectedBatchIndex={selectedBatchIndex}
-            onBatchSelect={handleBatchSelect}
-          />}
-
-          {/* Pricing Options */}
-          {/* <DeliveryOptions onOptionChange={(value) => console.log('Selected option:', value)} /> */}
-
-          {/* <button className="mt-4 bg-primary text-primary-foreground py-3 rounded font-medium">
-            Next
-          </button> */}
+          {/* Tab Content */}
+          <div className="flex-1 overflow-auto">
+            {activeTab === 'deliveries' ? (
+              <>
+                <div className="p-4 border-b">
+                  <h1 className="font-semibold text-lg mb-2">Delivery Route Optimization</h1>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleAutoAssign}
+                      disabled={isOptimizing || orders.length === 0}
+                      className="w-full"
+                    >
+                      {isOptimizing ? "Optimizing..." : "Optimize Routes"}
+                    </Button>
+                  </div>
+                </div>
+                {
+                  directions ? (
+                    <RouteInfo
+                      directions={directions}
+                      selectedBatchId={selectedBatchId}
+                      onBatchSelect={handleBatchSelect}
+                    />
+                  ) : (
+                    <div className="p-4 text-sm text-gray-500">
+                      No routes optimized yet. Click "Optimize Routes" to start.
+                    </div>
+                  )
+                }
+              </>
+            ) : (
+              <div className="p-4">
+                <div className="space-y-4">
+                  {localOrders.map((order, index) => (
+                    <div
+                      key={order.id}
+                      className="p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleOrderSelect(order)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-medium">Order #{order.orderNumber}</h3>
+                          <p className="text-sm text-gray-500">{order.destination}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-3 mt-1">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                            <line x1="16" y1="2" x2="16" y2="6" />
+                            <line x1="8" y1="2" x2="8" y2="6" />
+                            <line x1="3" y1="10" x2="21" y2="10" />
+                          </svg>
+                          <span className="text-xs opacity-90">
+                            {new Date(order.deliveryStart).toLocaleTimeString()} - {new Date(order.deliveryEnd).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Map */}
@@ -426,10 +563,13 @@ export default function Home() {
           center={center}
           directions={directions}
           orders={localOrders}
-          selectedBatchIndex={selectedBatchIndex}
+          selectedBatchId={selectedBatchId}
+          onBatchSelect={handleBatchSelect}
+          selectedDelivery={selectedDelivery}
+          onDeliverySelect={setSelectedDelivery}
         >
           {Object.entries(markerPositions).map(([id, position]) => {
-            const order = orders.find(o => o.id === id);
+            const order = localOrders.find(o => o.id === id);
             return (
               <Marker
                 key={id}
@@ -445,138 +585,136 @@ export default function Home() {
 }
 
 interface RouteInfoProps {
-    directions: google.maps.DirectionsResult | null
-    selectedBatchIndex?: number
-    onBatchSelect?: (index: number) => void
+  directions: google.maps.DirectionsResult | null
+  selectedBatchId?: string
+  onBatchSelect?: (batchId: string) => void
 }
 
-function RouteInfo({ directions, selectedBatchIndex, onBatchSelect }: RouteInfoProps) {
-    if (!directions || !directions.routes[0]) return null
+function RouteInfo({ directions, selectedBatchId, onBatchSelect }: RouteInfoProps) {
+  if (!directions || !directions.routes[0]) return null
 
-    const routes = directions.routes
-    const legs = routes[0].legs
+  const routes = directions.routes
+  const legs = routes[0].legs
 
-    if (!legs) return null
+  if (!legs) return null
 
-    // Extract batch information if available
-    const batchInfo = (directions as any).batchInfo ||
-        (directions.routes.length > 1 ? {
-            totalBatches: directions.routes.length,
-            totalDeliveries: directions.routes.length,
-            averageDeliveriesPerBatch: 1,
-            batches: directions.routes.map((route, index) => ({
-                batchSize: 1,
-                totalDuration: route.legs[0]?.duration?.value || 0,
-                totalDistance: route.legs[0]?.distance?.value || 0,
-                estimatedCompletionTime: Math.ceil((route.legs[0]?.duration?.value || 0) / 60),
-                deliveries: [{
-                    destination: route.legs[0]?.end_address || '',
-                    stopNumber: 1,
-                    estimatedArrival: route.legs[0]?.duration?.text || 'N/A'
-                }],
-                routeMetrics: {
-                    legs: route.legs.map(leg => ({
-                        duration: leg.duration,
-                        distance: leg.distance,
-                        startAddress: leg.start_address,
-                        endAddress: leg.end_address
-                    }))
-                }
-            }))
-        } : null);
+  // Extract batch information if available
+  const batchInfo = (directions as any).batchInfo ||
+    (directions.routes.length > 1 ? {
+      totalBatches: directions.routes.length,
+      totalDeliveries: directions.routes.length,
+      averageDeliveriesPerBatch: 1,
+      batches: directions.routes.map((route, index) => ({
+        id: `batch-${index}`,
+        batchSize: 1,
+        totalDuration: route.legs[0]?.duration?.value || 0,
+        totalDistance: route.legs[0]?.distance?.value || 0,
+        estimatedCompletionTime: Math.ceil((route.legs[0]?.duration?.value || 0) / 60),
+        deliveries: [{
+          destination: route.legs[0]?.end_address || '',
+          stopNumber: 1,
+          estimatedArrival: route.legs[0]?.duration?.text || 'N/A',
+          deliveryStart: '',
+          deliveryEnd: ''
+        }],
+        routeMetrics: {
+          legs: route.legs.map(leg => ({
+            duration: leg.duration,
+            distance: leg.distance,
+            startAddress: leg.start_address,
+            endAddress: leg.end_address
+          }))
+        }
+      }))
+    } : null);
 
-    return (
-        <div className="flex flex-col gap-4">
-            {batchInfo && (
-                <Card className="p-4">
-                    <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold">Optimized Delivery Batches</h3>
-                        <div className="flex gap-4 text-sm">
-                            <span>Total Batches: {batchInfo.totalBatches}</span>
-                            <span>Total Deliveries: {batchInfo.totalDeliveries}</span>
-                            <span>Avg. Deliveries/Batch: {batchInfo.averageDeliveriesPerBatch.toFixed(1)}</span>
+  return (
+    <div className="flex flex-col gap-4">
+      {batchInfo && (
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Optimized Delivery Batches</h3>
+            <div className="flex gap-4 text-sm">
+              <span>Total Batches: {batchInfo.totalBatches}</span>
+              <span>Total Deliveries: {batchInfo.totalDeliveries}</span>
+              <span>Avg. Deliveries/Batch: {batchInfo.averageDeliveriesPerBatch.toFixed(1)}</span>
+            </div>
+          </div>
+          <div className="space-y-4">
+            {(batchInfo.batches || []).map((batch, batchIndex) => (
+              <div
+                key={batch.id}
+                className={`p-4 rounded-md cursor-pointer transition-colors ${selectedBatchId === batch.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted hover:bg-muted/80'
+                  }`}
+                onClick={() => onBatchSelect?.(batch.id)}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold text-base">Batch {batchIndex + 1}</span>
+                    <span className="text-xs px-2 py-1 rounded-full bg-muted-foreground/10">
+                      {batch.batchSize} deliveries
+                    </span>
+                    <span className="text-xs px-2 py-1 rounded-full bg-muted-foreground/10">
+                      {Math.ceil(batch.estimatedCompletionTime)} min total
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {batch.deliveries.map((delivery, index) => (
+                    <div key={index} className="pl-4 border-l-2 border-muted-foreground/20">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium bg-muted-foreground/10 px-1.5 py-0.5 rounded">
+                          Stop {delivery.stopNumber}
+                        </span>
+                        <p className="text-sm">{delivery.destination}</p>
+                      </div>
+                      <div className="flex gap-3 mt-1">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
+                          <span className="text-xs opacity-90">
+                            {delivery.duration}
+                          </span>
                         </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                            <line x1="16" y1="2" x2="16" y2="6" />
+                            <line x1="8" y1="2" x2="8" y2="6" />
+                            <line x1="3" y1="10" x2="21" y2="10" />
+                          </svg>
+                          <span className="text-xs opacity-90">
+                            ETA: {delivery.estimatedArrival}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2v20M2 12h20" />
+                          </svg>
+                          <span className="text-xs opacity-90">
+                            {batch.routeMetrics.legs[index]?.distance?.text || 'Distance N/A'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <ScrollArea className="h-[300px] w-full pr-4">
-                        <div className="space-y-4">
-                            {(batchInfo.batches || []).map((batch, batchIndex) => (
-                                <div
-                                    key={batchIndex}
-                                    className={`p-4 rounded-md cursor-pointer transition-colors ${
-                                        selectedBatchIndex === batchIndex
-                                            ? 'bg-primary text-primary-foreground'
-                                            : 'bg-muted hover:bg-muted/80'
-                                    }`}
-                                    onClick={() => onBatchSelect?.(batchIndex)}
-                                >
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-semibold text-base">Batch {batchIndex + 1}</span>
-                                            <span className="text-xs px-2 py-1 rounded-full bg-muted-foreground/10">
-                                                {batch.batchSize} deliveries
-                                            </span>
-                                            <span className="text-xs px-2 py-1 rounded-full bg-muted-foreground/10">
-                                                {Math.ceil(batch.estimatedCompletionTime)} min total
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3">
-                                        {batch.deliveries.map((delivery, index) => (
-                                            <div key={index} className="pl-4 border-l-2 border-muted-foreground/20">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-xs font-medium bg-muted-foreground/10 px-1.5 py-0.5 rounded">
-                                                        Stop {delivery.stopNumber}
-                                                    </span>
-                                                    <p className="text-sm">{delivery.destination}</p>
-                                                </div>
-                                                <div className="flex gap-3 mt-1">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                            <circle cx="12" cy="12" r="10" />
-                                                            <polyline points="12 6 12 12 16 14" />
-                                                        </svg>
-                                                        <span className="text-xs opacity-90">
-                                                            {delivery.estimatedArrival}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                            <path d="M12 2v20M2 12h20" />
-                                                        </svg>
-                                                        <span className="text-xs opacity-90">
-                                                            {batch.routeMetrics.legs[index]?.distance?.text || 'Distance N/A'}
-                                                        </span>
-                                                    </div>
-                                                    {delivery.deliveryStart && (
-                                                        <div className="flex items-center gap-1.5">
-                                                            <svg className="w-3.5 h-3.5 opacity-70" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                                                                <line x1="16" y1="2" x2="16" y2="6" />
-                                                                <line x1="8" y1="2" x2="8" y2="6" />
-                                                                <line x1="3" y1="10" x2="21" y2="10" />
-                                                            </svg>
-                                                            <span className="text-xs opacity-90">
-                                                                {new Date(delivery.deliveryStart).toLocaleTimeString()} - {new Date(delivery.deliveryEnd).toLocaleTimeString()}
-                                                            </span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                        <div className="mt-3 pt-3 border-t border-muted-foreground/10">
-                                            <div className="flex justify-between text-xs">
-                                                <span>Total Distance: {(batch.totalDistance / 1000).toFixed(1)} km</span>
-                                                <span>Total Duration: {Math.ceil(batch.totalDuration / 60)} mins</span>
-                                                <span>Service Time: {batch.batchSize * 15} mins</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </ScrollArea>
-                </Card>
-            )}
+                  ))}
+                  <div className="mt-3 pt-3 border-t border-muted-foreground/10">
+                    <div className="flex justify-between text-xs">
+                      <span>Total Distance: {(batch.totalDistance / 1000).toFixed(1)} km</span>
+                      <span>Total Duration: {Math.ceil(batch.totalDuration / 60)} mins</span>
+                      <span>Service Time: {batch.batchSize * 15} mins</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-    )
+      )}
+    </div>
+  )
 }
