@@ -76,7 +76,7 @@ const products = [
 ];
 
 // Generate orders
-export const orders: Delivery[] = Array.from({ length: 30 }, (_, i) => {
+export const orders: Delivery[] = Array.from({ length: 200 }, (_, i) => {
   const id = (i + 1).toString().padStart(3, '0');
   const location = generateRandomAddress();
   const coords = generateRandomLocation();

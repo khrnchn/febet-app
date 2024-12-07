@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { DM_Sans } from 'next/font/google'
 import "./globals.css";
 import Header from "@/components/custom/header";
 
@@ -13,6 +14,12 @@ const geistMono = localFont({
   variable: "--font-geist-mono",
   weight: "100 900",
 });
+
+const dmSans = DM_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+  variable: '--font-dm-sans',
+})
 
 export const metadata: Metadata = {
   title: "Febet - Delivery Management Platform",
@@ -32,7 +39,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full bg-gray-50">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`} suppressHydrationWarning
+        className={`${geistSans.variable} ${geistMono.variable} ${dmSans.variable} antialiased h-full font-sans`} suppressHydrationWarning
       >
         <Header />
         {children}

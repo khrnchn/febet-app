@@ -75,7 +75,7 @@ export default function Map({
     const getBatchColor = (batchId: string | null) => {
         if (!batchId || !directions || !(directions as any).batchInfo?.batches) {
             console.log('No batch ID or directions data:', { batchId });
-            return "#808080"; // Grey for unassigned
+            return "#00B0FF"; // Grey for unassigned
         }
 
         const batchIndex = (directions as any).batchInfo.batches.findIndex(
@@ -145,7 +145,29 @@ export default function Map({
                         ],
                     }}
                 >
-                    {orders.map((order, index) => {
+                    {/* Source Marker */}
+                    <Marker
+                        position={{ lat: 3.100240985840765, lng: 101.63122341164973 }}
+                        label={{
+                            text: 'HQ',
+                            color: 'white',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            className: 'marker-label absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2'
+                        }}
+                        icon={{
+                            path: 'M -15,-8 L 15,-8 15,8 -15,8 z',
+                            fillColor: '#FF69B4',
+                            fillOpacity: 1,
+                            strokeColor: '#FFFFFF',
+                            strokeWeight: 2,
+                            scale: 2,
+                        }}
+                        title="BloomThis HQ"
+                    />
+
+                    {/* Delivery Markers */}
+                            {orders.map((order, index) => {
                         const batchId = getOrderBatchId(order.id);
                         const isInSelectedBatch = selectedBatchId === batchId;
                         const markerColor = getBatchColor(batchId);
@@ -165,9 +187,9 @@ export default function Map({
                                     path: google.maps.SymbolPath.CIRCLE,
                                     fillColor: markerColor,
                                     fillOpacity: selectedBatchId ? (isInSelectedBatch ? 1 : 0.3) : 1,
+                                    strokeColor: '#FFFFFF',
                                     strokeWeight: isSelected ? 4 : 2,
-                                    strokeColor: isSelected ? markerColor : 'white',
-                                    scale: isSelected ? 14 : 12,
+                                    scale: isSelected ? 18 : 14,
                                 }}
                                 title={`${order.orderNumber} - ${order.destination}`}
                                 onClick={() => handleMarkerClick(order)}
@@ -205,17 +227,6 @@ export default function Map({
                             }}
                         />
                     )}
-                    <Marker
-                        position={{ lat: 3.100240985840765, lng: 101.63122341164973 }}
-                        title="BloomThis HQ"
-                        icon={{
-                            path: google.maps.SymbolPath.CIRCLE,
-                            scale: 10,
-                            fillColor: 'red',
-                            fillOpacity: 1,
-                            strokeWeight: 0,
-                        }}
-                    />
                 </GoogleMap>
             ) : (
                 <div className="w-full h-full flex items-center justify-center">
